@@ -3,51 +3,52 @@ import scala.io.Source
 
 object Wrapper {
 
-  private val EOL: String = System.lineSeparator()
-
-  private def isEOL(c: Char): Boolean = c == '\n'
-
-  private def isSep(c: Char): Boolean = c == ' ' || isEOL(c)
+  private val EOL: String = "\n" //this works better on windows
 
   def wrap(max: Long, source: Source, write: String => Unit): Unit = {
+    val buffer = StringBuilder()
+
     @tailrec
-    def parse(count: Int, buffer: StringBuilder): Unit = {
+    def parse(count: Int = 0): Unit = {
       val currentToken = if (source.hasNext) Some(source.next) else None
 
+      val (bufferSize, word) = (buffer.size, buffer.toString)
+      val overflow = count + bufferSize + 1 > max
       val newCount = currentToken match {
-        case Some(c) if c == '\r' => count //ignore chars like \r
-        case Some(c) if !isSep(c) => //buffer a word
+        case Some('\r') => count // ignore  \r on windows
+        case Some(' ') => //buffer new word, it will not preserve the whitespaces at the start of the line
+          buffer.clear()
+          if (overflow) { // wrap at space if is the case if not just write the word
+            write(s"$EOL$word")
+            bufferSize + 1
+          } else {
+            val withSpace =
+              if (count > 0) s" $word" else word //don't add spaces at the start of the row
+            write(withSpace)
+            count + withSpace.length()
+          }
+        case Some('\n') => //move to another row
+          buffer.clear()
+          if (overflow) {
+            write(s"$EOL$word")
+            bufferSize
+          } else {
+            if (count > 0) write(" ") //don't add spaces at the start of the row
+            write(s"$word$EOL")
+            0
+          }
+        case Some(c) => // buffer a word
           buffer.append(c)
           count
-        case Some(c) if isSep(c) => //preserve line ends
-          val bufferSize = buffer.size
-          val word = buffer.toString()
-          buffer.clear()
-          if (count + bufferSize > max) { //wrap at space if is the case if not just write the word
-            write(EOL)
-            if (count > 0)
-              write(word)
-            bufferSize + 1
-          } else { //write the word
-            if (count > 0) write(" ")
-            write(word)
-            if (isEOL(c)) {
-              0
-            } else {
-              count + bufferSize + 1
-            }
-          }
-        case Some(_) => count //exhaustive
         case None =>
-          if (count + buffer.size > max) write(EOL)
-          else write(" ")
+          if (overflow) write(EOL) else write(" ")
           write(buffer.toString())
           -1
       }
-      if (newCount >= 0) parse(newCount, buffer)
+      if (newCount >= 0) parse(newCount)
       else ()
     }
 
-    parse(0, StringBuilder())
+    parse()
   }
 }
